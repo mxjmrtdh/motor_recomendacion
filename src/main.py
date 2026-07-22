@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import time
+
 from src.feature_store import FeatureStoreMemoria
+from src.database import obtener_detalle_producto_db
 
 app = FastAPI(
     title="Motor de Recomendación de Comercio Electrónico (Olist)",
@@ -9,8 +11,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Carga global del Feature Store en RAM
+# Carga global del Feature Store
 feature_store = FeatureStoreMemoria()
+
+# --- Esquemas Pydantic (Validación y Contrato) ---
+class ProductoResponse(BaseModel):
+    product_id: str
+    category: str
+    price: float
+    total_ventas: int
+    latencia_ms: float
+
+# --- Endpoints ---
 
 @app.get("/")
 def check_health():
@@ -19,7 +31,6 @@ def check_health():
         "mensaje": "Servicio de Recomendación de Olist operando correctamente."
     }
 
-# Endpoint para consultar el perfil en caché (Día 2)
 @app.get("/usuario/perfil/{customer_id}")
 def obtener_perfil_usuario(customer_id: str):
     inicio = time.time()
@@ -31,6 +42,22 @@ def obtener_perfil_usuario(customer_id: str):
         "latencia_ms": latencia_ms,
         "perfil_features": perfil
     }
+
+# Endpoint Día 3: Consulta Directa a SQLite
+@app.get("/producto/{product_id}", response_model=ProductoResponse)
+def obtener_producto(product_id: str):
+    inicio = time.time()
+    detalle = obtener_detalle_producto_db(product_id)
+    
+    if not detalle:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"El producto con ID '{product_id}' no existe en la base de datos."
+        )
+    
+    latencia_ms = round((time.time() - inicio) * 1000, 2)
+    detalle["latencia_ms"] = latencia_ms
+    return detalle
 
 @app.get("/recomendar/{product_id}")
 def recomendar_productos_mock(product_id: str, limite: int = 5):
