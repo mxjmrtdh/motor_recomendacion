@@ -12,10 +12,29 @@ from src.motor_bfs import MotorBFS
 
 from src.cold_start import obtener_populares_por_categoria
 
+import csv
+from datetime import datetime
+
 # Configuración de rutas para los artefactos de IA
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "modelo_final.pkl")
 MAPPING_PATH = os.path.join(BASE_DIR, "models", "mapeo_categorias.pkl")
+
+# Ruta del archivo de logs en la raíz del proyecto
+LOGS_FILE = os.path.join(BASE_DIR, "logs.csv")
+
+def registrar_log_peticion(product_id: str, status_code: int, latencia_ms: float, estrategia: str):
+    """Escribe de manera continua cada petición procesada en el archivo logs.csv."""
+    file_exists = os.path.exists(LOGS_FILE)
+    
+    with open(LOGS_FILE, mode="a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        # Si el archivo no existe, escribimos los encabezados requeridos por la ficha
+        if not file_exists:
+            writer.writerow(["timestamp", "product_id", "status_code", "latencia_ms", "estrategia"])
+        
+        timestamp_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        writer.writerow([timestamp_actual, product_id, status_code, latencia_ms, estrategia])
 
 # Variables globales en memoria RAM
 modelo_ia = None
@@ -110,6 +129,9 @@ def recomendar_productos(product_id: str, limite: int = 5):
         cat_origen = detalle_origen["category"] if detalle_origen else None
         
         populares = obtener_populares_por_categoria(categoria=cat_origen, limite=limite)
+
+        # Registrar la petición en el archivo logs.csv (Exigencia Día 7 - Dev 2)
+        registrar_log_peticion(product_id, 200, latencia_total, "COLD_START_POPULARIDAD_CATEGORIA")
         
         return {
             "producto_origen_id": product_id,
@@ -159,6 +181,9 @@ def recomendar_productos(product_id: str, limite: int = 5):
     )[:limite]
 
     latencia_total = round((time.time() - inicio_tiempo) * 1000, 2)
+
+    # Registrar la petición en el archivo logs.csv (Exigencia Día 7 - Dev 2)
+    registrar_log_peticion(product_id, 200, latencia_total, "BFS_PLUS_IA_RERANKING")
 
     return {
         "producto_origen_id": product_id,
