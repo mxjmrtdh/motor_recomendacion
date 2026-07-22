@@ -1,2 +1,18 @@
-pandas>=2.0.0
-scikit-learn>=1.3.0
+# versiones compatibles con python 3.13
+# ---- Ingeniería de Datos e IA (Desarrollador 1) ----
+pandas
+scikit-learn
+
+# ---- Backend y API (Desarrollador 2) ----
+fastapi
+uvicorn[standard]
+
+
+# versiones compatibles con python 3.12
+# ---- Ingeniería de Datos e IA (Desarrollador 1) ----
+# pandas==2.2.2
+# scikit-learn==1.5.0
+
+# ---- Backend y API (Desarrollador 2) ----
+# fastapi==0.111.0
+# uvicorn[standard]==0.30.1
