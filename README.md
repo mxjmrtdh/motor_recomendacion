@@ -16,3 +16,14 @@ uvicorn src.main:app --reload
 
 ## Para probar los candidatos
 ### aca2eb7d00ea1a7b8ebd4e68314663af
+
+# para correr el proyecto con docker se tiene que ejecutar lo siguiente:
+## Construir la imagen
+docker build -t motor-recomendacion-olist .
+
+## Ejecutar el contenedor mapeando ambos puertos
+docker run -d -p 8000:8000 -p 8501:8501 --name olist_app motor-recomendacion-olist
+
+## las rutas a consultar son
+API / Swagger UI: http://localhost:8000/docs
+Dashboard Interactivos: http://localhost:8501
