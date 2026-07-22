@@ -4,57 +4,56 @@ from pydantic import BaseModel
 import time
 import pickle
 import os
+import pandas as pd
 
 from src.feature_store import FeatureStoreMemoria
 from src.database import obtener_detalle_producto_db
+from src.motor_bfs import MotorBFS
 
 # Configuración de rutas para los artefactos de IA
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "modelo_final.pkl")
 MAPPING_PATH = os.path.join(BASE_DIR, "models", "mapeo_categorias.pkl")
 
-# Variables globales donde residirán los artefactos en RAM
+# Variables globales en memoria RAM
 modelo_ia = None
 mapeo_categorias = None
 feature_store = None
+motor_bfs = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Gestor del ciclo de vida del servidor (MLOps).
-    Carga los modelos e infraestructura en memoria RAM antes de recibir peticiones.
-    """
-    global modelo_ia, mapeo_categorias, feature_store
+    """Gestor del ciclo de vida del servidor (MLOps)."""
+    global modelo_ia, mapeo_categorias, feature_store, motor_bfs
     
     print("\n=== [MÓDULO MLOPS] Cargando artefactos en el arranque de la API ===")
     
     # 1. Cargar Feature Store
     feature_store = FeatureStoreMemoria()
     
-    # 2. Cargar Modelo de IA (.pkl)
+    # 2. Cargar Motor BFS
+    motor_bfs = MotorBFS()
+    
+    # 3. Cargar Modelo de IA (.pkl)
     if os.path.exists(MODEL_PATH):
         with open(MODEL_PATH, "rb") as f:
             modelo_ia = pickle.load(f)
-        print("[MLOPS] ¡Modelo clasificador (.pkl) cargado con éxito en RAM!")
+        print("[MLOPS] ¡Modelo clasificador (.pkl) cargado con éxito!")
     else:
-        print("[MLOPS WARN] No se encontró modelo_final.pkl en models/")
+        print("[MLOPS WARN] No se encontró modelo_final.pkl")
 
-    # 3. Cargar Mapeo de Categorías (.pkl)
+    # 4. Cargar Mapeo de Categorías (.pkl)
     if os.path.exists(MAPPING_PATH):
         with open(MAPPING_PATH, "rb") as f:
             mapeo_categorias = pickle.load(f)
-        print("[MLOPS] ¡Mapeo de categorías (.pkl) cargado con éxito en RAM!")
+        print("[MLOPS] ¡Mapeo de categorías (.pkl) cargado con éxito!")
     else:
-        print("[MLOPS WARN] No se encontró mapeo_categorias.pkl en models/")
+        print("[MLOPS WARN] No se encontró mapeo_categorias.pkl")
         
     print("=== [MÓDULO MLOPS] Servidor listo para inferencias en tiempo real ===\n")
-    
-    yield  # El servidor se mantiene ejecutando y respondiendo peticiones
-    
-    # Limpieza al apagar el servidor si fuera necesario
+    yield
     print("[MÓDULO MLOPS] Apagando servicios y liberando memoria...")
 
-# Inicialización de la aplicación
 app = FastAPI(
     title="Motor de Recomendación de Comercio Electrónico (Olist)",
     description="API MLOps para la generación de recomendaciones en tiempo real.",
@@ -62,12 +61,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# --- Endpoints del Día 1, 2 y 3 ---
+# --- Endpoints ---
 
 @app.get("/")
 def check_health():
-    # Verificamos si los artefactos de IA están cargados correctamente
-    estado_modelos = (modelo_ia is not None) and (mapeo_categorias is not None)
+    estado_modelos = (modelo_ia is not None) and (mapeo_categorias is not None) and (motor_bfs is not None)
     return {
         "estado": "OK",
         "artefactos_ia_cargados": estado_modelos,
@@ -78,10 +76,9 @@ def check_health():
 def obtener_perfil_usuario(customer_id: str):
     inicio = time.time()
     perfil = feature_store.obtener_perfil_usuario(customer_id)
-    latencia_ms = round((time.time() - inicio) * 1000, 4)
     return {
         "customer_id": customer_id,
-        "latencia_ms": latencia_ms,
+        "latencia_ms": round((time.time() - inicio) * 1000, 4),
         "perfil_features": perfil
     }
 
@@ -97,17 +94,69 @@ def obtener_producto(product_id: str):
     detalle["latencia_ms"] = round((time.time() - inicio) * 1000, 2)
     return detalle
 
-# Endpoint MOCK (Aún no integrado con el motor real, corresponde al Día 5)
+# Endpoint Día 5: Recomendación Real con BFS + Re-ranking de IA
 @app.get("/recomendar/{product_id}")
-def recomendar_productos_mock(product_id: str, limite: int = 5):
-    inicio = time.time()
-    recomendaciones_simuladas = [
-        {"product_id": f"prod_simulado_{i}", "score_relevancia": round(0.95 - (i * 0.1), 2)}
-        for i in range(1, limite + 1)
-    ]
+def recomendar_productos(product_id: str, limite: int = 5):
+    inicio_tiempo = time.time()
+
+    # PASO 1: Generación de Candidatos vía BFS
+    candidatos_ids = motor_bfs.buscar_candidatos_bfs(product_id, max_candidatos=50)
+
+    # Si no hay candidatos por BFS (Cold Start), retornamos lista vacía controlada
+    if not candidatos_ids:
+        return {
+            "producto_origen_id": product_id,
+            "estrategia": "SIN_CANDIDATOS_BFS",
+            "total_recomendaciones": 0,
+            "latencia_ms": round((time.time() - inicio_tiempo) * 1000, 2),
+            "recomendaciones": []
+        }
+
+    # PASO 2: Obtener atributos de los candidatos desde SQLite
+    detalles_candidatos = motor_bfs.obtener_detalles_candidatos(candidatos_ids)
+
+    # PASO 3: Re-ranking con el Modelo de IA (.pkl)
+    candidatos_evaluados = []
+    
+    for item in detalles_candidatos:
+        cat_nombre = item["category"]
+        # Convertir categoría de texto a código numérico usando mapeo_categorias.pkl
+        cat_code = mapeo_categorias.get(cat_nombre, -1)
+        
+        # Preparar DataFrame de entrada para el modelo
+        df_input = pd.DataFrame([{
+            'price': item['price'],
+            'categoria_codificada': cat_code
+        }])
+
+        # Predecir probabilidad/score con la IA
+        try:
+            # Obtener probabilidad de la clase positiva (compro = 1)
+            probabilidades = modelo_ia.predict_proba(df_input)
+            score = float(probabilidades[0][1]) if probabilidades.shape[1] > 1 else 0.5
+        except Exception:
+            score = 0.5  # Fallback neutro en caso de error
+
+        candidatos_evaluados.append({
+            "product_id": item["product_id"],
+            "category": cat_nombre,
+            "price": item["price"],
+            "score_relevancia": round(score, 4)
+        })
+
+    # PASO 4: Ordenar candidatos por el Score de la IA de mayor a menor
+    candidatos_ordenados = sorted(
+        candidatos_evaluados, 
+        key=lambda x: x["score_relevancia"], 
+        reverse=True
+    )[:limite]
+
+    latencia_total = round((time.time() - inicio_tiempo) * 1000, 2)
+
     return {
         "producto_origen_id": product_id,
-        "total_recomendaciones": len(recomendaciones_simuladas),
-        "latencia_ms": round((time.time() - inicio) * 1000, 2),
-        "recomendaciones": recomendaciones_simuladas
+        "estrategia": "BFS_PLUS_IA_RERANKING",
+        "total_recomendaciones": len(candidatos_ordenados),
+        "latencia_ms": latencia_total,
+        "recomendaciones": candidatos_ordenados
     }

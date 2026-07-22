@@ -13,3 +13,6 @@ pip install -r requirements.txt
 uvicorn src.main:app --reload
 ## para la validación Interactiva (Swagger UI)
 ## Abre cualquier navegador web (Chrome, Firefox, Edge). Ingresa a esta dirección: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+## Para probar los candidatos
+### aca2eb7d00ea1a7b8ebd4e68314663af
