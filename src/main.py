@@ -10,6 +10,8 @@ from src.feature_store import FeatureStoreMemoria
 from src.database import obtener_detalle_producto_db
 from src.motor_bfs import MotorBFS
 
+from src.cold_start import obtener_populares_por_categoria
+
 # Configuración de rutas para los artefactos de IA
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "modelo_final.pkl")
@@ -102,14 +104,19 @@ def recomendar_productos(product_id: str, limite: int = 5):
     # PASO 1: Generación de Candidatos vía BFS
     candidatos_ids = motor_bfs.buscar_candidatos_bfs(product_id, max_candidatos=50)
 
-    # Si no hay candidatos por BFS (Cold Start), retornamos lista vacía controlada
+    # ESTRATEGIA COLD START FALLBACK: Si no hay candidatos BFS, usamos populares
     if not candidatos_ids:
+        detalle_origen = obtener_detalle_producto_db(product_id)
+        cat_origen = detalle_origen["category"] if detalle_origen else None
+        
+        populares = obtener_populares_por_categoria(categoria=cat_origen, limite=limite)
+        
         return {
             "producto_origen_id": product_id,
-            "estrategia": "SIN_CANDIDATOS_BFS",
-            "total_recomendaciones": 0,
+            "estrategia": "COLD_START_POPULARIDAD_CATEGORIA",
+            "total_recomendaciones": len(populares),
             "latencia_ms": round((time.time() - inicio_tiempo) * 1000, 2),
-            "recomendaciones": []
+            "recomendaciones": populares
         }
 
     # PASO 2: Obtener atributos de los candidatos desde SQLite
