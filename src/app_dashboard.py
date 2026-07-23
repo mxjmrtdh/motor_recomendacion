@@ -5,6 +5,10 @@ import sqlite3
 import os
 import time
 
+# Importar funciones de MLOps para ejecutarlas directamente desde la UI
+from pipeline_entrenamiento import ejecutar_pipeline_entrenamiento
+from pruebas_carga import ejecutar_pruebas_estres
+
 # Configuración básica de la página
 st.set_page_config(
     page_title="Sistema MLOps & Motor de Recomendaciones - Olist",
@@ -22,7 +26,7 @@ API_URL = "http://127.0.0.1:8000"
 def obtener_muestra_productos():
     """Consulta SQLite para obtener 15 IDs de productos reales para la muestra."""
     if not os.path.exists(DB_PATH):
-        return ["aca2eb7d00ea1a7b8ebd4e68314663af", "999eb05a1d84700284f4672bc175f123"]
+        return [("aca2eb7d00ea1a7b8ebd4e68314663af", "aca2eb7d00ea1a7b8ebd4e68314663af")]
     try:
         conn = sqlite3.connect(DB_PATH)
         query = """
@@ -36,7 +40,6 @@ def obtener_muestra_productos():
         df = pd.read_sql_query(query, conn)
         conn.close()
         
-        # Crear etiquetas legibles: "ID_CORTO - Categoria (X ventas)"
         opciones = []
         for _, row in df.iterrows():
             cat = row['product_category_name'] or 'sin_categoria'
@@ -60,15 +63,13 @@ def obtener_muestra_clientes():
     except Exception:
         return ["06b009f7d0738513a4220706a782e33b"]
 
-
 # Carga inicial de datos de muestra
 muestra_productos = obtener_muestra_productos()
 muestra_clientes = obtener_muestra_clientes()
 
-
 # --- Interfaz Principal ---
 st.title("🛍️ Portal de Control MLOps - Motor de Recomendaciones Olist")
-st.markdown("Plataforma interactiva para inferencia en tiempo real, monitoreo de latencias en `logs.csv` y consulta de Feature Store.")
+st.markdown("Plataforma interactiva para inferencia en tiempo real, monitoreo de latencias en `logs.csv`, Feature Store y pipelines de re-entrenamiento.")
 
 # Sidebar de Estado del Servidor
 st.sidebar.header("⚙️ Estado del Servidor FastAPI")
@@ -82,12 +83,12 @@ try:
 except Exception:
     st.sidebar.error("⚠️ La API no está ejecutándose en http://127.0.0.1:8000")
 
-
 # Definición de Pestañas (Tabs)
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "🎯 Probar Inferencia en Vivo", 
     "📊 Monitoreo de Latencias (logs.csv)", 
-    "👤 Feature Store (Usuarios)"
+    "👤 Feature Store (Usuarios)",
+    "🛠️ Herramientas MLOps (Re-entrenamiento & Estrés)"
 ])
 
 # ==============================================================================
@@ -98,8 +99,6 @@ with tab1:
     st.caption("Seleccione un producto de la lista desplegable de muestra o ingrese uno manualmente para evaluar el modelo.")
     
     col_sel, col_lim = st.columns([3, 1])
-    
-    # Mapeo para el selector desplegable
     opciones_prod_labels = [item[1] for item in muestra_productos] + ["-- Ingresar ID Manualmente --"]
     
     with col_sel:
@@ -108,11 +107,9 @@ with tab1:
             options=opciones_prod_labels
         )
         
-        # Lógica si elige ingresar manualmente
         if seleccion_prod == "-- Ingresar ID Manualmente --":
             product_input = st.text_input("Ingrese el Product ID personalizado:", value="aca2eb7d00ea1a7b8ebd4e68314663af")
         else:
-            # Extraer el ID real de la tupla seleccionada
             idx = opciones_prod_labels.index(seleccion_prod)
             product_input = muestra_productos[idx][0]
             st.info(f"🔑 **ID de Producto Activo:** `{product_input}`")
@@ -183,9 +180,8 @@ with tab2:
     df_logs = cargar_logs()
 
     if df_logs.empty:
-        st.info("ℹ️ No se encontraron registros en `logs.csv`. Genera peticiones en la Tab 1 o ejecuta `python src/pruebas_carga.py`.")
+        st.info("ℹ️ No se encontraron registros en `logs.csv`. Genera peticiones en la Tab 1 o ejecuta las Pruebas de Carga en la Tab 4.")
     else:
-        # KPIs del Sistema
         total_peticiones = len(df_logs)
         latencia_promedio = df_logs['latencia_ms'].mean()
         latencia_p95 = df_logs['latencia_ms'].quantile(0.95)
@@ -199,7 +195,6 @@ with tab2:
 
         st.divider()
 
-        # Gráficos
         g1, g2 = st.columns(2)
 
         with g1:
@@ -213,7 +208,6 @@ with tab2:
 
         st.divider()
 
-        # Tabla de Logs
         st.write("#### 📋 Registro Detallado de Eventos en `logs.csv` (Últimas 20 Peticiones)")
         st.dataframe(
             df_logs.sort_values(by="timestamp", ascending=False).head(20),
@@ -228,7 +222,6 @@ with tab3:
     st.caption("Seleccione un Customer ID de la muestra o ingrese uno manualmente para consultar sus métricas precalculadas en memoria.")
     
     col_cust, col_btn_cust = st.columns([3, 1])
-    
     opciones_cust = muestra_clientes + ["-- Ingresar ID Manualmente --"]
     
     with col_cust:
@@ -255,3 +248,46 @@ with tab3:
                 st.error("Error al obtener perfil de usuario.")
         except Exception as e:
             st.error(f"Error de conexión: {e}")
+
+# ==============================================================================
+# TAB 4: HERRAMIENTAS MLOPS (RE-ENTRENAMIENTO & PRUEBAS DE ESTRÉS)
+# ==============================================================================
+with tab4:
+    st.subheader("🛠️ Panel de Control MLOps: Operaciones del Modelo y Estrés")
+    st.markdown("Ejecute pipelines de ciclo de vida del modelo directamente desde la interfaz de usuario.")
+    
+    c1, c2 = st.columns(2)
+
+    # --------------------------------------------------------------------------
+    # SECCIÓN 1: RE-ENTRENAMIENTO Y DATA DRIFT
+    # --------------------------------------------------------------------------
+    with c1:
+        st.markdown("### 🔄 Re-entrenamiento Automatizado")
+        st.caption("Ejecuta la prueba de Kolmogorov-Smirnov (**Data Drift**) en los datos entrantes y aplica **GridSearchCV** para optimizar e hiperparámetrizar los artefactos `.pkl`.")
+        
+        if st.button("⚙️ Re-entrenar Modelo e Evaluar Drift", type="primary"):
+            with st.spinner("Analizando Data Drift y optimizando árbol de decisión con GridSearchCV..."):
+                try:
+                    ejecutar_pipeline_entrenamiento()
+                    st.success("✅ ¡Pipeline de re-entrenamiento ejecutado con éxito!")
+                    st.info("Los artefactos `modelo_final.pkl` y `mapeo_categorias.pkl` fueron actualizados en la carpeta `models/`.")
+                except Exception as e:
+                    st.error(f"Error durante el re-entrenamiento: {e}")
+
+    # --------------------------------------------------------------------------
+    # SECCIÓN 2: PRUEBAS DE CARGA / ESTRÉS
+    # --------------------------------------------------------------------------
+    with c2:
+        st.markdown("### ⚡ Generador de Pruebas de Carga")
+        st.caption("Simula un volumen continuo de peticiones hacia el endpoint de FastAPI para poblar el archivo `logs.csv` y verificar la resiliencia del sistema.")
+        
+        num_peticiones_sim = st.slider("Número de Peticiones Simultáneas:", min_value=10, max_value=200, value=50, step=10)
+        
+        if st.button("🚀 Ejecutar Prueba de Carga", type="secondary"):
+            with st.spinner(f"Enviando {num_peticiones_sim} peticiones concurrentes a FastAPI..."):
+                try:
+                    ejecutar_pruebas_estres(num_peticiones=num_peticiones_sim)
+                    st.success(f"✅ ¡{num_peticiones_sim} peticiones completadas y registradas en `logs.csv`!")
+                    st.info("Puedes dirigirte a la pestaña **'📊 Monitoreo de Latencias'** para inspeccionar las métricas actualizadas en tiempo real.")
+                except Exception as e:
+                    st.error(f"Error al ejecutar pruebas de carga: {e}")

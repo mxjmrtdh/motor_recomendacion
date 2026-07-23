@@ -103,3 +103,41 @@ motor_recomendacion/
 ├── logs.csv                      # Registro histórico de peticiones y latencias
 └── README.md                     # Documentación técnica completa
 ```
+
+---
+
+## ⚠️ NOTA IMPORTANTE: Formato de Saltos de Línea (`LF` vs `CRLF`)
+
+Al clonar o editar este repositorio en sistemas **Windows**, es crucial verificar la codificación de saltos de línea de los archivos ejecutable (especialmente `entrypoint.sh`).
+
+* **Problema:** Windows utiliza `CRLF` (`\r\n`), mientras que los contenedores basados en Linux requieren `LF` (`\n`). Si `entrypoint.sh` se guarda con `CRLF`, el contenedor fallará al iniciar mostrando un error similar a:
+  ```text
+  /bin/sh: /entrypoint.sh: no such file or directory  o  \r: command not found
+  ```
+
+Solución Rápida:
+
+1. En Visual Studio Code, abre entrypoint.sh y revisa la barra de estado inferior derecha. Si dice CRLF, haz clic sobre él y cámbialo a LF, luego guarda el archivo.
+
+2. Si usas Git en Windows, puedes desactivar la conversión automática ejecutando:  
+git config core.autocrlf false  
+
+3. En Linux/macOS, puedes corregirlo directamente con dos2unix:  
+dos2unix entrypoint.sh
+
+# 🔧 Solución de Problemas Frecuentes (Troubleshooting)
+1. Conflictos de Puertos (8000 u 8501 ocupados)
+Si los puertos predeterminados están en uso por otra aplicación en tu máquina host, puedes mapear los puertos del contenedor a otros puertos libres:  
+Mapea la API al puerto 8080 y el Dashboard al 8502  
+docker run -d -p 8080:8000 -p 8502:8501 --name app_olist motor-recomendacion-olist
+
+* Acceso API: http://localhost:8080/docs
+
+* Acceso Dashboard: http://localhost:8502
+
+2. Permisos de escritura en logs.csv  
+El contenedor requiere permisos de escritura en el directorio raíz para volcar las métricas de latencia en logs.csv. Si estás ejecutando en entornos Linux con SELinux o permisos estrictos y el archivo no se crea, asegúrate de otorgar permisos de lectura/escritura al directorio del proyecto antes de construir la imagen:  
+chmod -R 777 .
+3. Verificar estado de los contenedores y logs
+Para ver la salida de logs en tiempo real de FastAPI y Streamlit dentro de Docker:  
+docker logs -f app_olist

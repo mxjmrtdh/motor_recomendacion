@@ -130,6 +130,8 @@ def recomendar_productos(product_id: str, limite: int = 5):
         
         populares = obtener_populares_por_categoria(categoria=cat_origen, limite=limite)
 
+        latencia_total = round((time.time() - inicio_tiempo) * 1000, 2)
+
         # Registrar la petición en el archivo logs.csv (Exigencia Día 7 - Dev 2)
         registrar_log_peticion(product_id, 200, latencia_total, "COLD_START_POPULARIDAD_CATEGORIA")
         
